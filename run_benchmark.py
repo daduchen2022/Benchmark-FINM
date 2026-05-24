@@ -43,15 +43,45 @@ def main() -> int:
         concurrency=args.concurrency,
     ))
 
-    # Pretty leaderboard.
+    # Leaderboard.
     print("\n=== Leaderboard ===")
-    rows = sorted(summary["per_model"].items(), key=lambda kv: -kv[1]["score"])
+    rows = sorted(summary["per_model"].items(), key=lambda kv: -kv[1]["score_total"])
+    n = summary["max_possible_score"]
     width = max(len(name) for name, _ in rows)
-    print(f"{'model':<{width}}  score  accuracy  errors  sampling")
+    print(f"{'model':<{width}}   score   accuracy  errors  sampling")
     for name, t in rows:
         sampling = "ctrl" if t["sampling_controlled"] else "UNCTRL"
-        print(f"{name:<{width}}  {t['score']:>5}  {t['accuracy']:>7.1%}  "
-              f"{t['errors']:>6}  {sampling}")
+        print(f"{name:<{width}}  {t['score_total']:>5.2f}/{int(n):<2}  "
+              f"{t['accuracy']:>7.1%}  {t['errors']:>6}  {sampling}")
+
+    # Per-category breakdown.
+    all_cats = sorted({c for t in summary["per_model"].values() for c in t.get("per_category", {})})
+    if all_cats:
+        print(f"\n=== Per-category score (max 10 per category) ===")
+        print(f"{'model':<{width}}  " + "  ".join(f"{c:>12}" for c in all_cats))
+        for name, t in rows:
+            cells = []
+            for c in all_cats:
+                pc = t["per_category"].get(c)
+                if pc:
+                    cells.append(f"{pc['score']:>5.1f}/{pc['total']:<2}")
+                else:
+                    cells.append(f"{'-':>10}")
+            print(f"  {name:<{width-2}}  " + "  ".join(f"{cell:>12}" for cell in cells))
+
+    # Missed / errored per model.
+    print("\n=== Missed (score < 1) / errored per model ===")
+    for name, t in rows:
+        missed = t.get("missed_ids", [])
+        errs   = t.get("error_ids", [])
+        if not missed and not errs:
+            detail = "(all max)"
+        else:
+            parts = []
+            if missed: parts.append(f"missed: {', '.join(missed)}")
+            if errs:   parts.append(f"error:  {', '.join(errs)}")
+            detail = "  |  ".join(parts)
+        print(f"  {name:<{width}}  {detail}")
     return 0
 
 
