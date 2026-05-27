@@ -1,12 +1,16 @@
 """OpenRouter client + the two LLM judges.
 
 Three public async entry points:
-  - call_model(cfg, prompt)                 -> str
+  - call_model(cfg, prompt)                 -> (content, CallStats)
       Single-shot call to one of the models under test.
-  - judge_answer(question, expected, raw)   -> (correct, extracted, judge_text)
+  - judge_answer(question, expected, raw)   -> (correct, extracted, judge_text, CallStats)
       Binary judge for number / string / choice / unspecified answer types.
-  - judge_rubric_score(question, rubric, raw) -> (raw_total, judge_text, breakdown)
+  - judge_rubric_score(question, rubric, raw) -> (raw_total, judge_text, breakdown, CallStats)
       Rubric judge for `answer_type == "open"` questions.
+
+`CallStats` carries observability for one API call: latency, tokens (split by
+input / output / reasoning), cost, and finish_reason. The runner stitches
+model + judge stats into the per-cell Result.
 
 All calls go through one shared `AsyncOpenAI` client pointed at OpenRouter.
 The SDK handles 5xx / 429 / connection retries with exponential backoff.
@@ -16,7 +20,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
+from dataclasses import dataclass
 
+from .errors import BinaryJudgeParseError, EmptyChoicesError, RubricJudgeParseError
 from .models import ModelConfig
 from .prompts import (
     JUDGE_SYSTEM_PROMPT,
@@ -41,27 +48,74 @@ JUDGE_CALL_TIMEOUT_S = 60.0
 JUDGE_EXCERPT_HEAD = 4000
 JUDGE_EXCERPT_TAIL = 4000
 
-# Single judge for both binary and rubric paths. DeepSeek-v4-pro is ~10x
-# cheaper than Sonnet for comparable instruction-following on this task.
+# Judge model. DeepSeek-v4-pro is a reasoning model — we give it generous
+# completion budget so its internal reasoning tokens don't starve the
+# visible output (the previous failure mode that produced empty replies).
 JUDGE_MODEL = "deepseek/deepseek-v4-pro"
+JUDGE_PRICE_IN = 0.435   # $ / 1M prompt tokens   (verified 2026-05-26)
+JUDGE_PRICE_OUT = 0.870  # $ / 1M completion tokens
+
+# Token caps for the two judge paths. Reasoning + visible output share this
+# budget — if reasoning eats it all, content comes back empty. We give a
+# generous cap because deepseek-v4-pro (the judge) is a reasoning model
+# that easily burns 2000+ tokens internally on multi-fact or rubric cells.
+BINARY_JUDGE_MAX_TOKENS = 4000
+RUBRIC_JUDGE_MAX_TOKENS = 5000
+
+# Model under test gets a more generous budget — reasoning models can chew
+# through this. Truncation (finish_reason=="length") is treated as a wrong
+# answer (cell scored 0), not as a re-runnable error.
+MODEL_MAX_TOKENS = 8192
 
 
-class RubricJudgeParseError(RuntimeError):
-    """Raised when the rubric judge's reply can't be parsed: missing
-    ```json block, malformed JSON, or empty `scores` list. The cell is
-    recorded as `error` (re-runnable) — not as the model scoring 0."""
+# ---------------------------------------------------------------------------
+# Per-call observability
+# ---------------------------------------------------------------------------
+@dataclass
+class CallStats:
+    """One API call's observability. Shared shape for model and judge calls."""
+    latency_s: float = 0.0
+    input_tokens: int = 0
+    output_tokens: int = 0       # full completion budget consumed (incl. reasoning)
+    reasoning_tokens: int = 0    # subset of output_tokens, 0 if not reported
+    cost_usd: float = 0.0
+    finish_reason: str = "stop"
 
 
-class BinaryJudgeParseError(RuntimeError):
-    """Raised when the binary judge returns an empty / unparseable reply.
-    Like RubricJudgeParseError, the cell is recorded as `error` so it can
-    be re-run — never as the model scoring 0 due to a silent judge failure."""
+def _reasoning_tokens(usage) -> int:
+    """Extract reasoning tokens from the SDK usage object, defensive against
+    older / non-reasoning responses that don't include the details block."""
+    details = getattr(usage, "completion_tokens_details", None)
+    if details is None:
+        return 0
+    val = getattr(details, "reasoning_tokens", 0)
+    return int(val or 0)
 
 
-class EmptyChoicesError(RuntimeError):
-    """Raised when an OpenRouter response comes back with `choices=None`
-    or empty (sometimes happens on upstream content-filter rejections that
-    the SDK doesn't surface as an exception). Cell is recorded as `error`."""
+def _stats_from(resp, latency_s: float, price_in: float, price_out: float) -> CallStats:
+    """Build a CallStats from a chat-completion response + wall-clock latency.
+
+    Defensive: some OpenRouter providers occasionally return a response with
+    `usage=None` (rare but real). When that happens we still return a usable
+    CallStats — just with token counts / cost = 0. Latency + finish_reason
+    are always recovered.
+    """
+    finish_reason = resp.choices[0].finish_reason or "stop"
+    u = resp.usage
+    if u is None:
+        return CallStats(latency_s=latency_s, finish_reason=finish_reason)
+    inp = int(u.prompt_tokens or 0)
+    out = int(u.completion_tokens or 0)
+    reasoning = _reasoning_tokens(u)
+    cost = (inp * price_in + out * price_out) / 1_000_000
+    return CallStats(
+        latency_s=latency_s,
+        input_tokens=inp,
+        output_tokens=out,
+        reasoning_tokens=reasoning,
+        cost_usd=cost,
+        finish_reason=finish_reason,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -122,8 +176,6 @@ def _parse_rubric_judge_output(text: str, rubric: dict) -> tuple[float, list[dic
     silently drops the param. Clamping is essential: LLM judges sometimes
     award more than a criterion's max — we trust the rubric, not the judge.
     """
-    # Primary path: pure JSON object (response_format enforced).
-    # Fallback: extract from a ```json``` fenced block if present.
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
@@ -140,7 +192,6 @@ def _parse_rubric_judge_output(text: str, rubric: dict) -> tuple[float, list[dic
     if not isinstance(breakdown, list) or not breakdown:
         raise RubricJudgeParseError(f"missing or empty 'scores': {parsed!r}")
 
-    # Clamp each criterion score to [0, max_points].
     max_by_id = {cr["id"]: float(cr["points"])
                  for cat in rubric["categories"] for cr in cat["criteria"]}
     for item in breakdown:
@@ -151,7 +202,6 @@ def _parse_rubric_judge_output(text: str, rubric: dict) -> tuple[float, list[dic
             except (TypeError, ValueError):
                 item["score"] = 0.0
 
-    # Recompute total from the clamped scores; clamp once more to the global cap.
     raw_total = sum(item["score"] for item in breakdown
                     if isinstance(item.get("score"), (int, float)))
     return min(raw_total, float(rubric["total_points"])), breakdown
@@ -160,48 +210,45 @@ def _parse_rubric_judge_output(text: str, rubric: dict) -> tuple[float, list[dic
 # ---------------------------------------------------------------------------
 # Public entry points
 # ---------------------------------------------------------------------------
-async def call_model(cfg: ModelConfig, prompt: str) -> tuple[str, str]:
+async def call_model(cfg: ModelConfig, prompt: str) -> tuple[str, CallStats]:
     """Ask the model under test to answer `prompt`. Single HTTP call, no tools.
 
-    Returns `(content, finish_reason)`. `finish_reason == "length"` means the
-    model hit the `max_tokens` cap before finishing — the runner counts that
-    as a wrong answer (the model failed to produce a final answer in budget).
-
-    The SDK-level timeout (MODEL_CALL_TIMEOUT_S) raises openai.APITimeoutError
-    on overrun; the runner catches that as a cell-level error.
+    Returns `(content, CallStats)`. `stats.finish_reason == "length"` means
+    the model hit `max_tokens` before finishing — the runner counts that as
+    a wrong answer.
     """
     client = _get_client()
+    t0 = time.time()
     resp = await client.chat.completions.create(
         model=cfg.model_id,
         temperature=0,
         top_p=1.0,
-        max_tokens=8192,
+        max_tokens=MODEL_MAX_TOKENS,
         messages=[
             {"role": "system", "content": MODEL_SYSTEM_PROMPT},
             {"role": "user",   "content": prompt},
         ],
     )
-    # Some providers occasionally return a 200 with `choices=None` (e.g. upstream
-    # content filter rejection that the SDK doesn't surface as an exception).
-    # Treat as a re-runnable error rather than silently scoring 0.
+    latency = time.time() - t0
     if not resp.choices:
         raise EmptyChoicesError(f"empty choices in response from {cfg.model_id}")
-    choice = resp.choices[0]
-    return (choice.message.content or "", choice.finish_reason or "stop")
+    content = resp.choices[0].message.content or ""
+    return content, _stats_from(resp, latency, cfg.price_in, cfg.price_out)
 
 
 async def judge_answer(question: str, expected: str,
-                       raw_response: str) -> tuple[bool, str, str]:
-    """Binary judge. Returns (is_correct, extracted_answer, full_judge_text)."""
+                       raw_response: str) -> tuple[bool, str, str, CallStats]:
+    """Binary judge. Returns (is_correct, extracted_answer, full_judge_text, stats)."""
     if not raw_response.strip():
-        return False, "N/A", "model returned empty response"
+        return False, "N/A", "model returned empty response", CallStats()
 
     client = _get_client().with_options(timeout=JUDGE_CALL_TIMEOUT_S)
+    t0 = time.time()
     resp = await client.chat.completions.create(
         model=JUDGE_MODEL,
         temperature=0,
         top_p=1.0,
-        max_tokens=1000,
+        max_tokens=BINARY_JUDGE_MAX_TOKENS,
         messages=[
             {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
             {"role": "user",   "content": (
@@ -212,6 +259,9 @@ async def judge_answer(question: str, expected: str,
             )},
         ],
     )
+    latency = time.time() - t0
+    stats = _stats_from(resp, latency, JUDGE_PRICE_IN, JUDGE_PRICE_OUT)
+
     text = (resp.choices[0].message.content or "").strip()
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
 
@@ -224,23 +274,24 @@ async def judge_answer(question: str, expected: str,
     extracted = lines[0]
     verdict = lines[-1].upper()
     is_correct = verdict.startswith("YES")
-    return is_correct, extracted, text
+    return is_correct, extracted, text, stats
 
 
 async def judge_rubric_score(question: str, rubric: dict,
-                             raw_response: str) -> tuple[float, str, list]:
-    """Rubric judge. Returns (raw_total, full_judge_text, per_criterion_breakdown).
+                             raw_response: str) -> tuple[float, str, list, CallStats]:
+    """Rubric judge. Returns (raw_total, full_judge_text, breakdown, stats).
     Raises RubricJudgeParseError if the judge's reply can't be parsed.
     """
     if not raw_response.strip():
-        return 0.0, "model returned empty response", []
+        return 0.0, "model returned empty response", [], CallStats()
 
     client = _get_client().with_options(timeout=JUDGE_CALL_TIMEOUT_S)
+    t0 = time.time()
     resp = await client.chat.completions.create(
         model=JUDGE_MODEL,
         temperature=0,
         top_p=1.0,
-        max_tokens=1500,
+        max_tokens=RUBRIC_JUDGE_MAX_TOKENS,
         response_format={"type": "json_object"},   # forces pure JSON reply
         messages=[
             {"role": "system", "content": RUBRIC_JUDGE_SYSTEM_PROMPT},
@@ -252,6 +303,9 @@ async def judge_rubric_score(question: str, rubric: dict,
             )},
         ],
     )
+    latency = time.time() - t0
+    stats = _stats_from(resp, latency, JUDGE_PRICE_IN, JUDGE_PRICE_OUT)
+
     text = (resp.choices[0].message.content or "").strip()
     raw_total, breakdown = _parse_rubric_judge_output(text, rubric)
-    return raw_total, text, breakdown
+    return raw_total, text, breakdown, stats

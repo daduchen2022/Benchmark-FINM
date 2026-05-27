@@ -47,6 +47,15 @@ def _build_summary(results, models, questions, timestamp: str,
         "missed_ids": [], "error_ids": [],
         "per_category": defaultdict(lambda: {"score": 0.0, "total": 0}),
         "sampling_controlled": m.supports_temperature,
+        # Observability aggregates (NEW)
+        "model_cost_usd": 0.0, "judge_cost_usd": 0.0, "total_cost_usd": 0.0,
+        "model_input_tokens": 0, "model_output_tokens": 0,
+        "model_reasoning_tokens": 0,
+        "judge_input_tokens": 0, "judge_output_tokens": 0,
+        "judge_reasoning_tokens": 0,
+        "model_latency_s_total": 0.0, "judge_latency_s_total": 0.0,
+        "truncated_count": 0,
+        "missing_final_answer_line": 0,
     } for m in models}
 
     # Accumulate every result into its model + per-category buckets.
@@ -62,19 +71,42 @@ def _build_summary(results, models, questions, timestamp: str,
         elif r.score < 1.0:
             t["missed_ids"].append(r.question_id)
 
-    # Finalize: derived accuracy + plain-dict per_category.
+        # Tokens, cost, latency
+        t["model_cost_usd"]          += getattr(r, "model_cost_usd", 0.0)
+        t["judge_cost_usd"]          += getattr(r, "judge_cost_usd", 0.0)
+        t["model_input_tokens"]      += getattr(r, "model_input_tokens", 0)
+        t["model_output_tokens"]     += getattr(r, "model_output_tokens", 0)
+        t["model_reasoning_tokens"]  += getattr(r, "model_reasoning_tokens", 0)
+        t["judge_input_tokens"]      += getattr(r, "judge_input_tokens", 0)
+        t["judge_output_tokens"]     += getattr(r, "judge_output_tokens", 0)
+        t["judge_reasoning_tokens"]  += getattr(r, "judge_reasoning_tokens", 0)
+        t["model_latency_s_total"]   += getattr(r, "model_latency_s", 0.0)
+        t["judge_latency_s_total"]   += getattr(r, "judge_latency_s", 0.0)
+        if getattr(r, "extracted_answer", None) == "[truncated]":
+            t["truncated_count"] += 1
+        if not getattr(r, "has_final_answer_line", True) and not r.error:
+            t["missing_final_answer_line"] += 1
+
+    # Finalize: derived metrics + plain-dict per_category.
     for t in totals.values():
         t["accuracy"] = t["score_total"] / t["total"] if t["total"] else 0.0
+        t["total_cost_usd"] = t["model_cost_usd"] + t["judge_cost_usd"]
+        t["avg_model_latency_s"] = (
+            t["model_latency_s_total"] / t["total"] if t["total"] else 0.0)
+        t["avg_judge_latency_s"] = (
+            t["judge_latency_s_total"] / t["total"] if t["total"] else 0.0)
         t["per_category"] = {
             cat: {**c, "accuracy": c["score"] / c["total"] if c["total"] else 0.0}
             for cat, c in t["per_category"].items()
         }
 
+    grand_total_cost = sum(t["total_cost_usd"] for t in totals.values())
     return {
         "timestamp": timestamp,
         "num_questions": len(questions),
         "num_models": len(models),
         "max_possible_score": float(len(questions)),
+        "total_cost_usd": grand_total_cost,
         "per_model": totals,
         "details_file": details_filename,
     }
