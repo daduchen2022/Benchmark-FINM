@@ -20,6 +20,7 @@ try:
 except ImportError:
     pass
 
+from pipeline import clients
 from pipeline.runner import run_benchmark
 
 
@@ -67,12 +68,21 @@ def main() -> int:
     p.add_argument("--label",
                    help="suffix for output files, e.g. 'run2' -> details_run2.json. "
                         "Default: timestamp.")
+    p.add_argument("--judge",
+                   help=f"override the judge model (OpenRouter id). "
+                        f"Default: {clients.JUDGE_MODEL}. "
+                        f"Known: {', '.join(sorted(clients.KNOWN_JUDGE_PRICING))}.")
     args = p.parse_args()
 
     questions_path = Path(args.questions)
     if not questions_path.exists():
         print(f"error: {questions_path} not found", file=sys.stderr)
         return 1
+
+    if args.judge:
+        clients.set_judge(args.judge)
+        print(f"[runner] judge: {clients.JUDGE_MODEL} "
+              f"(${clients.JUDGE_PRICE_IN}/${clients.JUDGE_PRICE_OUT} per Mtok)")
 
     summary = asyncio.run(run_benchmark(
         questions_path=questions_path,

@@ -6,6 +6,47 @@ Version history for the Quant Interview Benchmark. The current spec lives in
 
 ---
 
+## v3.11 — cross-judge experimentation: pluggable judge + numeric pre-check (2026-05-27)
+
+Motivated by observing meaningful judgement variance across judges on the
+same model outputs. Adds infrastructure to run multi-judge experiments and
+narrows the cross-judge gap on the deterministic numeric path.
+
+- **`--judge <openrouter-id>` flag** on all entry scripts. Default judge
+  is unchanged (`deepseek/deepseek-v4-pro`); the override sets the model
+  via the new `clients.set_judge()` helper, which looks up pricing in
+  `KNOWN_JUDGE_PRICING`. Known judges so far: deepseek-v4-pro,
+  gemini-3.1-flash-lite, openai/gpt-5.5, claude-sonnet-4.6, x-ai/grok-4.3.
+- **`rejudge_run.py`** (new) — fourth entry script. Re-judges every cell of
+  an existing `details_*.json` with a (possibly different) judge, reusing
+  each cell's preserved `raw_response`. No model re-calls — cheap and
+  isolates the judge effect: same outputs, two judges → any score delta
+  is the judge's. Used for the run2 × {gemini, deepseek, sonnet} comparison.
+- **Numeric pre-check (deterministic fast-path).** `judge_answer` now
+  attempts to parse both expected and the model's committed answer (from
+  the `Final Answer:` line) as clean numeric forms — plain decimal,
+  percent, simple fraction `a/b`, currency `$199,900.46`. If both parse
+  and agree within 1e-4 relative tolerance (or 1e-9 absolute), the cell
+  auto-passes — no judge call. Skips ~20% of binary cells (~95 of 400 in
+  the current dataset). Tolerance is deliberately tight: a safety check
+  against the 357 cells both gemini and deepseek agreed on showed 0 false
+  positives. Disagreements still fall through to the judge.
+- **Strengthened binary-judge prompt** with concrete few-shot examples
+  for: numeric-equivalence (0.647 ≈ 0.6475 → YES), fraction-vs-decimal
+  (90/139 ≈ 0.6475 → YES), inequality literalism (≥ vs > → NO), hedged
+  multi-commit ("64.7% or 0.65" → use the first value), and
+  Rule-of-72-style approximations (200000 vs 202237 → NO).
+- **Tolerant rubric-JSON parser**, three new fallbacks composed in
+  `_parse_rubric_judge_output`:
+  1. `_loads_tolerant` strips trailing commas before retrying
+     `json.loads` (gemini-flash-lite emits these).
+  2. Whitespace normalisation of object keys (deepseek sometimes
+     emits `" scores"` instead of `"scores"`).
+  3. `_extract_object_with_key` walks the text yielding each top-level
+     balanced `{...}` block and returns the first that parses to a dict
+     with the expected key (sonnet emits chain-of-thought prose then a
+     bare JSON object).
+
 ## v3.7 — pipeline robustness fixes (2026-05-25)
 
 - **Judge excerpt is now head + tail, not tail-only.** The model's raw response

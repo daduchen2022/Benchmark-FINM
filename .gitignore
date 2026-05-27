@@ -15,9 +15,6 @@ env/
 LLM/
 *.egg-info/
 
-# Benchmark output (regenerate by re-running)
-results/
-
 # Sharing archives — keep out of git
 *.zip
 *.tar.gz

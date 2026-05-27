@@ -18,6 +18,7 @@ The SDK handles 5xx / 429 / connection retries with exponential backoff.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import time
@@ -51,9 +52,38 @@ JUDGE_EXCERPT_TAIL = 4000
 # Judge model. DeepSeek-v4-pro is a reasoning model — we give it generous
 # completion budget so its internal reasoning tokens don't starve the
 # visible output (the previous failure mode that produced empty replies).
+#
+# Override at run time via the entry-script `--judge` flag, which calls
+# set_judge() below. To add a new candidate, append to KNOWN_JUDGE_PRICING
+# with prices verified against OpenRouter.
 JUDGE_MODEL = "deepseek/deepseek-v4-pro"
 JUDGE_PRICE_IN = 0.435   # $ / 1M prompt tokens   (verified 2026-05-26)
 JUDGE_PRICE_OUT = 0.870  # $ / 1M completion tokens
+
+KNOWN_JUDGE_PRICING: dict[str, tuple[float, float]] = {
+    # model_id : (price_in, price_out) per 1M tokens
+    "deepseek/deepseek-v4-pro":     (0.435, 0.870),
+    "google/gemini-3.1-flash-lite": (0.250, 1.500),
+    "openai/gpt-5.5":               (5.000, 30.000),
+    "anthropic/claude-sonnet-4.6":  (3.000, 15.000),
+    "x-ai/grok-4.3":                (1.250, 2.500),
+}
+
+
+def set_judge(model_id: str) -> None:
+    """Override the judge model used by judge_answer / judge_rubric_score.
+    Prices come from KNOWN_JUDGE_PRICING — extend that dict to add a new
+    candidate. Raises ValueError if the model_id isn't listed."""
+    global JUDGE_MODEL, JUDGE_PRICE_IN, JUDGE_PRICE_OUT
+    if model_id not in KNOWN_JUDGE_PRICING:
+        raise ValueError(
+            f"Unknown judge model {model_id!r}. "
+            f"Add it to KNOWN_JUDGE_PRICING in pipeline/clients.py "
+            f"(with prices verified against OpenRouter). "
+            f"Known: {sorted(KNOWN_JUDGE_PRICING)}"
+        )
+    JUDGE_MODEL = model_id
+    JUDGE_PRICE_IN, JUDGE_PRICE_OUT = KNOWN_JUDGE_PRICING[model_id]
 
 # Token caps for the two judge paths. Reasoning + visible output share this
 # budget — if reasoning eats it all, content comes back empty. We give a
@@ -168,6 +198,134 @@ def _excerpt_for_judge(text: str) -> str:
     )
 
 
+def _extract_object_with_key(text: str, key: str) -> dict | None:
+    """Find top-level balanced `{...}` blocks in `text` and return the first
+    that parses (via _loads_tolerant) to a dict containing `key` (whitespace
+    in keys is tolerated). For prying a rubric JSON object out of reasoning
+    prose without being confused by inline `{...}` fragments."""
+    depth, start, candidates = 0, None, []
+    for i, c in enumerate(text):
+        if c == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif c == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start is not None:
+                candidates.append(text[start:i + 1])
+                start = None
+    for cand in candidates:
+        parsed = _loads_tolerant(cand)
+        if isinstance(parsed, dict) and any(
+            isinstance(k, str) and k.strip() == key for k in parsed
+        ):
+            return parsed
+    return None
+
+
+def _loads_tolerant(text: str) -> dict | None:
+    """Strict json.loads, with one retry after stripping trailing commas
+    before `]` or `}`. Returns None if both attempts fail. Some judges
+    (notably gemini-flash) emit JSON with trailing commas — invalid per
+    spec, but recoverable with a one-line cleanup that's safe on valid input."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            return json.loads(re.sub(r",(\s*[\]}])", r"\1", text))
+        except json.JSONDecodeError:
+            return None
+
+
+# ---------------------------------------------------------------------------
+# Numeric pre-check (fast-path for binary judging)
+# ---------------------------------------------------------------------------
+# When both `expected` and the model's committed answer parse as clean numeric
+# values, we can decide YES/NO deterministically in Python instead of asking
+# an LLM judge. This removes a known source of cross-judge variance: weaker
+# judges sometimes do surface-string rounding ("0.6475 → 0.648 ≠ 0.647 → NO")
+# instead of verifying the underlying numeric equivalence the judge prompt
+# explicitly asks for. The pre-check fires only on agreement; on disagreement
+# or any non-clean form (algebraic, prose, multi-fact, multiple-choice), the
+# call falls through to the judge.
+#
+# Tolerance is deliberately tight: this fast-path is for cases where the two
+# numbers are *essentially identical* (currency-precision differences, 1/2 vs
+# 0.5, exact fraction matches). Ambiguous cases — where reasonable graders
+# can disagree on whether a 0.5% off answer counts — fall through to the
+# judge so its few-shot examples and CoT can engage. The safety check on the
+# run2 dataset showed that 0.5% would false-positive on 10 cells where both
+# judges correctly said NO (e.g. expected 519, committed 518).
+PRECHECK_REL_TOL = 1e-4
+PRECHECK_ABS_TOL = 1e-9
+
+_FINAL_ANSWER_RX = re.compile(r"final answer\s*:\s*(.+?)(?:\n|$)", re.IGNORECASE)
+
+
+def _extract_committed(raw: str) -> str | None:
+    """Text after the LAST 'Final Answer:' line, stripped. None if missing."""
+    matches = _FINAL_ANSWER_RX.findall(raw)
+    return matches[-1].strip() if matches else None
+
+
+def _parse_number(s: str | None) -> float | None:
+    """Parse `s` as a single clean numeric value: decimal, percent, or simple
+    fraction `a/b`. Returns None on any non-clean form (text mixed with
+    numbers, multi-fact, MCQ letters, algebraic expressions) — those stay
+    in the judge's hands."""
+    if not s:
+        return None
+    s = s.strip().rstrip(".,;:!?")
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    if s.endswith("%"):
+        try:
+            return float(s[:-1].strip()) / 100.0
+        except ValueError:
+            pass
+    if s.count("/") == 1:
+        a, b = s.split("/")
+        try:
+            num, den = float(a.strip()), float(b.strip())
+            if den != 0:
+                return num / den
+        except ValueError:
+            pass
+    # Currency / thousand-separator: "$199,900.46", "199,900", "$1.50". The
+    # comma-grouping requirement (every 3 digits) keeps "A, B, D" from being
+    # misread as 123.
+    m = re.fullmatch(r"\$?(-?\d{1,3}(?:,\d{3})+(?:\.\d+)?)", s)
+    if m:
+        return float(m.group(1).replace(",", ""))
+    m = re.fullmatch(r"\$(-?\d+(?:\.\d+)?)", s)
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def _numeric_precheck(expected: str, raw_response: str
+                      ) -> tuple[bool, str, str] | None:
+    """Try to decide the cell deterministically by numeric comparison.
+    Returns (is_correct, extracted, reasoning) if the pre-check fires,
+    else None (call the judge). Only fires on agreement — disagreement
+    falls through so the judge can recognize equivalent forms we missed."""
+    expected_num = _parse_number(expected)
+    if expected_num is None:
+        return None
+    committed = _extract_committed(raw_response)
+    committed_num = _parse_number(committed)
+    if committed_num is None:
+        return None
+    if math.isclose(expected_num, committed_num,
+                    rel_tol=PRECHECK_REL_TOL, abs_tol=PRECHECK_ABS_TOL):
+        reasoning = (f"numeric pre-check: committed {committed_num:g} ≈ "
+                     f"expected {expected_num:g} (rel_tol={PRECHECK_REL_TOL})")
+        return True, committed[:60], reasoning
+    return None
+
+
 def _parse_rubric_judge_output(text: str, rubric: dict) -> tuple[float, list[dict]]:
     """Parse the judge's JSON reply, clamp scores, and return (raw_total, breakdown).
 
@@ -176,19 +334,28 @@ def _parse_rubric_judge_output(text: str, rubric: dict) -> tuple[float, list[dic
     silently drops the param. Clamping is essential: LLM judges sometimes
     award more than a criterion's max — we trust the rubric, not the judge.
     """
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
+    parsed = _loads_tolerant(text)
+    if parsed is None:
+        # Fenced ```json``` block (some providers wrap JSON in markdown)
         m = re.search(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL | re.IGNORECASE)
-        if not m:
-            raise RubricJudgeParseError(
-                f"no parseable JSON in judge reply (got {len(text)} chars)")
-        try:
-            parsed = json.loads(m.group(1))
-        except json.JSONDecodeError as e:
-            raise RubricJudgeParseError(f"JSON decode failed: {e}")
+        if m:
+            parsed = _loads_tolerant(m.group(1))
+    if parsed is None:
+        # Bare object embedded in prose (Sonnet emits reasoning + raw JSON,
+        # often with inline {...} fragments in the prose like LaTeX or
+        # example dicts). Walk text yielding each top-level balanced {...}
+        # block; return the first that parses to a dict with a 'scores' key.
+        parsed = _extract_object_with_key(text, "scores")
+    if parsed is None:
+        raise RubricJudgeParseError(
+            f"no parseable JSON in judge reply (got {len(text)} chars)")
 
-    breakdown = parsed.get("scores")
+    # Some judges emit object keys with stray whitespace (e.g. " scores"
+    # instead of "scores"). Normalize before lookup — safe on clean keys.
+    if isinstance(parsed, dict):
+        parsed = {k.strip() if isinstance(k, str) else k: v
+                  for k, v in parsed.items()}
+    breakdown = parsed.get("scores") if isinstance(parsed, dict) else None
     if not isinstance(breakdown, list) or not breakdown:
         raise RubricJudgeParseError(f"missing or empty 'scores': {parsed!r}")
 
@@ -258,9 +425,20 @@ async def call_model(cfg: ModelConfig, prompt: str) -> tuple[str, CallStats]:
 
 async def judge_answer(question: str, expected: str,
                        raw_response: str) -> tuple[bool, str, str, CallStats]:
-    """Binary judge. Returns (is_correct, extracted_answer, full_judge_text, stats)."""
+    """Binary judge. Returns (is_correct, extracted_answer, full_judge_text, stats).
+
+    Tries a deterministic numeric pre-check first (clean decimal/percent/fraction
+    agreement within tolerance → YES, no judge call). Falls through to the
+    LLM judge for everything else (non-numeric expected, prose/algebraic
+    committed answers, multi-fact, MCQ, or numeric disagreement where an
+    equivalent form might still match)."""
     if not raw_response.strip():
         return False, "N/A", "model returned empty response", CallStats()
+
+    pre = _numeric_precheck(expected, raw_response)
+    if pre is not None:
+        is_correct, extracted, reasoning = pre
+        return is_correct, extracted, reasoning, CallStats()
 
     user = (
         f"Question:\n{question}\n\n"

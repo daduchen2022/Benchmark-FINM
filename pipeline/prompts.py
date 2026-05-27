@@ -88,6 +88,27 @@ Grading rules:
 7. If the question asks more than the expected answer specifies, the model
    only needs to match the part the expected answer covers.
 
+Concrete examples of numeric equivalence (DO this, not surface-string rounding):
+  EXPECTED 0.647   COMMITTED 0.6475
+    WRONG → "0.6475 rounds to 0.648, not 0.647" — that's surface rounding.
+    RIGHT → 0.6475 and 0.647 agree at the 4th decimal place (delta < 0.1%);
+            same underlying number. Verdict: YES.
+  EXPECTED 0.647   COMMITTED 0.65
+    Differ by ~0.5%, outside reasonable tolerance. Verdict: NO.
+  EXPECTED 1/2     COMMITTED 0.5            → same value. YES.
+  EXPECTED 1/2     COMMITTED 50%            → same value, different form. YES.
+  EXPECTED 90/139  COMMITTED 0.6475         → 90/139 ≈ 0.6475. YES.
+  EXPECTED N > 5   COMMITTED N ≥ 5          → ≥ includes 5; > does not.
+                                              Different inequality. NO.
+
+  EXPECTED 202237  COMMITTED 200000 ("~$200K via Rule of 72")
+    Off by ~0.7%. Approximation methodology / "right hint" does NOT excuse
+    missing the exact value when an exact value was expected. Verdict: NO.
+  EXPECTED 0.647   COMMITTED "Approximately 64.7% (or ~0.65)"
+    Model hedged with two values. Treat the FIRST committed value as the
+    answer (here 64.7% = 0.647). Hedging is fine if the primary value is
+    correct. Verdict: YES.
+
 Output (exactly 3 lines, no preamble, no JSON, no other text):
   Line 1: model's committed final answer (≤60 chars; for multi-fact, separate
           the key values with ';')

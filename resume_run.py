@@ -24,6 +24,7 @@ try:
 except ImportError:
     pass
 
+from pipeline import clients
 from pipeline.clients import has_api_key
 from pipeline.dataset import load_questions
 from pipeline.models import MODELS
@@ -121,7 +122,15 @@ def main() -> int:
     p.add_argument("--label",
                    help="suffix for output files, e.g. 'run2_resumed'. "
                         "Default: timestamp.")
+    p.add_argument("--judge",
+                   help=f"override the judge model (OpenRouter id). "
+                        f"Default: {clients.JUDGE_MODEL}. "
+                        f"Use the same value as the original run for consistency.")
     args = p.parse_args()
+
+    if args.judge:
+        clients.set_judge(args.judge)
+        print(f"[resume] judge: {clients.JUDGE_MODEL}")
 
     out_dir = Path(args.out)
     if args.partial:

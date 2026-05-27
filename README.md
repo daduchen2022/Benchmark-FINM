@@ -23,7 +23,7 @@ LLM/bin/pip install -r requirements.txt
 cp .env.example .env                  # then paste your OPENROUTER_API_KEY into .env
 ```
 
-### The three commands
+### The four commands
 
 ```bash
 # 1. Standard full run — 10 models × 50 questions = 500 cells
@@ -36,12 +36,25 @@ LLM/bin/python resume_run.py --label run2
 # 3. If the final output has `error` rows
 LLM/bin/python rerun_errors.py --label run2_fixed
 # Re-runs each error cell. Cheap (only judge) when raw_response was preserved.
+
+# 4. Re-judge an existing run with a different judge (judge swap, no model calls)
+LLM/bin/python rejudge_run.py \
+    --details results/details_run2.json \
+    --judge anthropic/claude-sonnet-4.6 \
+    --label run2_judge_sonnet
+# Reuses each cell's raw_response, calls only the judge. Isolates judge effect.
 ```
 
 `--label` controls the output filename suffix (defaults to a timestamp if
 omitted). The scripts NEVER overwrite existing files — each writes a new
 `details_<label>.{json,jsonl}`, `summary_<label>.json`, `scores_<label>.csv`
 into `results/`.
+
+**Judge selection.** Every script accepts `--judge <openrouter-id>` to
+override the default judge (`deepseek/deepseek-v4-pro`). Known judges with
+verified pricing are listed in `KNOWN_JUDGE_PRICING` in `pipeline/clients.py`
+— add new ones there. Keep the same `--judge` across run → resume → rerun
+for one experiment.
 
 Iterating on a single category:
 
@@ -183,9 +196,10 @@ summary**, **token usage**, and **issues per model**.
 │   ├── output.py            <- write details / summary / scores files
 │   └── runner.py            <- Result schema, per-cell evaluation, shared
 │                               orchestration helpers (rejudge, row_to_result)
-├── run_benchmark.py         <- (script 1/3) standard full run
-├── resume_run.py            <- (script 2/3) resume from a partial jsonl
-├── rerun_errors.py          <- (script 3/3) re-run `error` rows
+├── run_benchmark.py         <- (script 1/4) standard full run
+├── resume_run.py            <- (script 2/4) resume from a partial jsonl
+├── rerun_errors.py          <- (script 3/4) re-run `error` rows
+├── rejudge_run.py           <- (script 4/4) re-judge an existing run with a different judge
 ├── requirements.txt         <- runtime deps (pinned)
 └── results/                 <- benchmark outputs (gitignored)
 ```
@@ -212,6 +226,8 @@ The rest is set-and-forget.
 - **Errors all in one place.** Custom exceptions and `TRANSIENT_EXC` live in `pipeline/errors.py`. To catch a new error class as a cell-level error, edit only that file.
 - **Pipeline bugs don't get silently absorbed.** Only API / timeout / judge-parse errors become cell-level `error` (re-runnable). Dataset typos, SDK mismatches, etc. surface as exceptions. **Model truncation** (`finish_reason == "length"`) is counted as a wrong answer, not an error.
 - **Backward-compatible Result schema.** Every observability field has a default — older-version JSONL rows still round-trip cleanly through `Result(**row)`.
+- **Numeric pre-check fast-path.** Before calling the binary judge, the pipeline tries to parse both expected and the model's committed answer as clean numerics (decimal / percent / fraction / `$199,900.46`-style currency). If they agree within ~0.01% relative tolerance, the cell auto-passes deterministically — no judge call. Skips ~20% of binary cells, eliminates judge-model variance for the easy numeric path. Disagreements still fall through to the judge.
+- **Tolerant judge output parser.** The rubric judge has been observed to emit JSON with trailing commas (gemini), whitespace-padded keys (`" scores"`, deepseek), and chain-of-thought prose followed by raw JSON (sonnet). The parser handles all three before raising `RubricJudgeParseError`.
 
 ---
 
