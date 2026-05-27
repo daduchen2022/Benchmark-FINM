@@ -315,14 +315,24 @@ trace.
 |---|---|
 | `model` | Display name from `pipeline/models.py` |
 | `question_id` | Question id |
-| `score` | Float 0.0–1.0, contribution to the model's total |
+| `score` | Float 0.0–1.0, contribution to the model's total. Binary: 0 or 1; rubric: `raw_total / total_points` |
 | `correct` | Boolean for binary; `null` for rubric |
 | `extracted_answer` | Binary: judge's line 1. Rubric: `"rubric:N/M"`. Truncated model output: `"[truncated]"` |
-| `expected_answer` | String for binary; rubric dict for open |
+| `expected_answer` | String / number for binary; list of letters for MCQ; rubric dict for open |
 | `raw_response` | Model's full reply |
-| `judge_reasoning` | Full judge text |
-| `latency_s` | Wall-clock seconds for the model call |
+| `judge_reasoning` | Full judge text (3-line plain for binary; JSON object for rubric) |
 | `sampling_controlled` | `false` for the 1 model that ignores `temperature`/`top_p` |
+| `model_latency_s` | Wall-clock seconds for the model API call (TCP/TLS + queue + inference + response) |
+| `judge_latency_s` | Wall-clock seconds for the judge API call |
+| `latency_s` | `model_latency_s + judge_latency_s`. Does NOT include semaphore-wait time |
+| `model_input_tokens` | Prompt tokens consumed by the model |
+| `model_output_tokens` | Full completion budget consumed — **includes reasoning_tokens**; billing is on this |
+| `model_reasoning_tokens` | Subset of output_tokens that was internal thinking. `0` if the provider doesn't report it |
+| `model_finish_reason` | `"stop"` / `"length"` / `"content_filter"` / ... `"length"` means the cell is counted as wrong |
+| `judge_input_tokens` / `judge_output_tokens` / `judge_reasoning_tokens` | Same semantics, for the judge call |
+| `model_cost_usd` | `(input × price_in + output × price_out) / 1M` |
+| `judge_cost_usd` | Same, for the judge |
+| `has_final_answer_line` | `true` if the model's last ~500 chars contain `"Final Answer:"` — audits output-contract compliance |
 | `rubric_score` | Raw rubric total (0..total_points) for open; `null` otherwise |
 | `rubric_breakdown` | List of `{id, score, comment}` per criterion for open; `null` otherwise |
 | `error` | `"ExceptionType: message"`, or `null` |

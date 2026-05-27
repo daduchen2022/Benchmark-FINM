@@ -180,12 +180,10 @@ def main() -> int:
     for name, t in rows:
         missed = t.get("missed_ids", [])
         errs   = t.get("error_ids", [])
-        trunc  = t.get("truncated_count", 0)
         no_fa  = t.get("missing_final_answer_line", 0)
         parts = []
         if missed: parts.append(f"missed: {', '.join(missed)}")
         if errs:   parts.append(_c(f"error: {', '.join(errs)}", "93"))
-        if trunc:  parts.append(_c(f"truncated×{trunc}", "95"))
         if no_fa:  parts.append(_c(f"no-Final-Answer×{no_fa}", "93"))
         detail = "  |  ".join(parts) if parts else _c("(all max)", "92")
         print(f"  {name:<{width}}  {detail}")

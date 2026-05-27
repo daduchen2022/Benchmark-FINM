@@ -86,7 +86,11 @@ async def _eval_one(cfg: ModelConfig, q: dict, sem: asyncio.Semaphore,
                     progress: dict) -> Result:
     """Evaluate one (model, question) pair end-to-end.
     Splits the try block so a judge failure still preserves the model's real
-    latency / tokens / cost (model actually answered — only the judge bailed)."""
+    latency / tokens / cost (model actually answered — only the judge bailed).
+
+    Empty / truncated / filtered model responses don't need special-casing —
+    the judge functions early-return 0 when raw_response is empty, which
+    captures all three uninteresting paths with the same simple code."""
     async with sem:
         try:
             raw, model_stats = await call_model(cfg, q["question"])
@@ -95,9 +99,7 @@ async def _eval_one(cfg: ModelConfig, q: dict, sem: asyncio.Semaphore,
             result = _error_result(cfg, q, exc=e, raw="", model_stats=CallStats())
         else:
             try:
-                if model_stats.finish_reason == "length":
-                    result = _truncated_result(cfg, q, raw, model_stats)
-                elif q.get("answer_type") == "open":
+                if q.get("answer_type") == "open":
                     result = await _evaluate_rubric(cfg, q, raw, model_stats)
                 else:
                     result = await _evaluate_binary(cfg, q, raw, model_stats)
@@ -143,17 +145,6 @@ async def _evaluate_rubric(cfg, q, raw, model_stats: CallStats) -> Result:
         expected_answer=rubric,
         judge_reasoning=reasoning,
         rubric_score=raw_total, rubric_breakdown=breakdown,
-    )
-
-
-def _truncated_result(cfg, q, raw, model_stats: CallStats) -> Result:
-    """Model hit max_tokens before producing a Final Answer. Score 0, no judge."""
-    return _make_result(
-        cfg, q, raw, model_stats, CallStats(),
-        score=0.0, correct=False,
-        extracted_answer="[truncated]",
-        expected_answer=q.get("answer"),
-        judge_reasoning="model output truncated at max_tokens; counted as wrong",
     )
 
 
@@ -247,16 +238,14 @@ def _c(text: str, code: str) -> str:
 
 
 def _format_mark(r: Result) -> str:
-    """Per-cell status mark, color-coded for live stream.
-       E = error (yellow), ✗ = wrong (red), ✓ = correct (green),
-       numeric = rubric raw score (cyan), [trunc] = model truncation (magenta)."""
+    """Per-cell status mark for the live stream.
+       E (yellow) = re-runnable error, ✗ (red) = wrong, ✓ (green) = correct,
+       numeric (cyan) = rubric raw score."""
     if r.error:
-        return _c("E", "93")            # yellow
-    if r.extracted_answer == "[truncated]":
-        return _c("T", "95")            # magenta
+        return _c("E", "93")
     if r.rubric_score is not None:
-        return _c(f"{r.rubric_score:g}", "96")   # cyan
-    return _c("✓", "92") if r.correct else _c("✗", "91")  # green / red
+        return _c(f"{r.rubric_score:g}", "96")
+    return _c("✓", "92") if r.correct else _c("✗", "91")
 
 
 async def _persist_progress(r: Result, progress: dict) -> None:

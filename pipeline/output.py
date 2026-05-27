@@ -54,7 +54,6 @@ def _build_summary(results, models, questions, timestamp: str,
         "judge_input_tokens": 0, "judge_output_tokens": 0,
         "judge_reasoning_tokens": 0,
         "model_latency_s_total": 0.0, "judge_latency_s_total": 0.0,
-        "truncated_count": 0,
         "missing_final_answer_line": 0,
     } for m in models}
 
@@ -82,8 +81,6 @@ def _build_summary(results, models, questions, timestamp: str,
         t["judge_reasoning_tokens"]  += getattr(r, "judge_reasoning_tokens", 0)
         t["model_latency_s_total"]   += getattr(r, "model_latency_s", 0.0)
         t["judge_latency_s_total"]   += getattr(r, "judge_latency_s", 0.0)
-        if getattr(r, "extracted_answer", None) == "[truncated]":
-            t["truncated_count"] += 1
         if not getattr(r, "has_final_answer_line", True) and not r.error:
             t["missing_final_answer_line"] += 1
 
