@@ -76,7 +76,7 @@ Questions are sourced from classical quant-interview brainteasers, then **modifi
 - **Modified question** — the actual benchmark item, with surface changed but the same underlying logic.
 - **Decoy question** — one key assumption of the problem is altered, to test whether the model is mechanically applying the familiar solution pattern instead of reading the new prompt.
 
-Only when a candidate question yields a non-uniform "1, 1, 0" pattern across the three parts (recognises the original, solves the modification, *fails* the decoy by reflex) do we treat it as sufficiently decontaminated to use.
+A candidate question is kept only if the model does **not** produce the `1, 1, 0` response pattern across the three parts (recognises the original, solves the modification, *fails* the decoy by reflex). The `1, 1, 0` pattern signals the modification is too superficial — a model that pattern-matches on the canonical puzzle still scores on the modified version while reflexively missing the decoy's altered assumption. Such candidates are discarded; the survivors are questions where the modification is substantive enough to break the memorised template.
 
 The final ten questions cover recursive elimination, modular arithmetic, minimax search, strategic / game-theoretic reasoning, binary search, work-rate, and adversarial-majority logic.
 
