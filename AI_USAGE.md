@@ -42,9 +42,7 @@ was used to implement, not to author the substance.
 - The **no-tools experimental condition** — our decision to measure native
   reasoning rather than tool use.
 - The **rubric schema for derivatives** (`total_points` / `categories` /
-  `criteria` / `trap` field for catching common LLM failure modes) — we
-  designed the schema and wrote every rubric, including the traps for each
-  derivatives question.
+  `criteria` / `trap` field for catching common LLM failure modes) — we used AI in a limited assistive way to help organize possible rubric structures for open-ended responses, such as separating key conceptual points and common failure modes into criteria. However, the final rubrics, scoring logic, criteria weights, and trap conditions were ultimately designed and verified by us based on our own understanding of derivatives pricing
 - The **MCQ semantics** — "every multiple-choice question is potentially
   multi-select; the number of correct options is not announced" — our
   decision, with corresponding judge-prompt rule.
@@ -122,6 +120,37 @@ was used to implement, not to author the substance.
   multiple-choice rules to the judge prompt after observing under-strict
   AI-default behaviour.
 
+### Documentation — drafted with AI assistance, finalized by us
+
+The three documents in this submission — [README.md](README.md),
+[docs/SPEC_v3.md](docs/SPEC_v3.md), and [report.md](report.md) — were
+**drafted with the help of AI** under our direction:
+
+- **We wrote the outlines.** Section structure, claims to make, which
+  figures go where, what each subsection is supposed to argue — all
+  ours. The AI did not propose the structure.
+- **We supplied every number.** All benchmark scores, accuracy
+  percentages, cost figures, cross-judge spreads, and per-cell
+  observations cited in the docs come from real `details_*.json` data
+  we generated, not from AI synthesis. When we asked the AI to draft a
+  table, we either pasted the numbers in or asked it to read the
+  committed JSON.
+- **AI drafted prose; we reviewed, edited, and cut.** First-pass
+  English wording was AI-generated for many paragraphs (e.g., the
+  "where models succeed" / "where models fail" sections in
+  [report.md](report.md), the multi-paragraph CHANGELOG entries, the
+  pluggable-judge section of SPEC §2). We rewrote what wasn't
+  precise, deleted what wasn't honest, and verified every concrete
+  claim against the data. Examples of cuts we ordered: a "derivatives
+  is structurally the hardest category" conclusion, a "per-model judge
+  variance" subsection — both removed because they overclaimed.
+- **We wrote the design rationale.** Sections that explain *why* a
+  design choice was made (the no-tools experimental condition, the
+  pluggable judge motivation, the verdict-parser bug story, why
+  deepseek as canonical) reflect our reasoning. The AI summarized our
+  decisions in prose; it did not author the decisions.
+
+
 ### Where AI was wrong and we corrected it
 
 - **The verdict-parser bug.** AI-written code with `startswith("YES")`. We
@@ -150,6 +179,7 @@ was used to implement, not to author the substance.
 | The three system prompts in `pipeline/prompts.py` | First-pass wording | Specified what each prompt must do, caught the dataset leaks, added MCQ / multi-fact / strictness rules, iterated until clean |
 | Entry scripts (`run_benchmark.py`, `resume_run.py`, `rerun_errors.py`, `rejudge_run.py`) | First-pass implementations | Specified CLI flags (`--label`, `--judge`), recovery semantics, and the never-overwrite rule |
 | Data files (`data/*.json`) | UTF-8 mojibake cleanup, ID renumbering, JSON-schema fitting, validator | We supplied all question content; verified every expected answer ourselves; chose category composition |
+| Documentation (`README.md`, `docs/SPEC_v3.md`, `docs/CHANGELOG.md`, `report.md`) | First-pass prose, table formatting, summarising our decisions into the existing doc structure, image-embedding | We wrote outlines, supplied every number from real data, reviewed/edited/cut prose, caught factual errors (e.g. stale max_tokens), and authored all design rationale and interpretive claims |
 
 ## 4. How we verified AI output
 
