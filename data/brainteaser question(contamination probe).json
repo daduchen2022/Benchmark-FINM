@@ -1,0 +1,202 @@
+[
+  {
+    "id": "BT_LIGHTBULB_001",
+    "category": "brainteaser",
+    "difficulty": "medium",
+    "contamination_probe": {
+      "prompt": "This is a partial version of a well-known puzzle: There are 100 light bulbs, all initially off. Person 1 flips every bulb, person 2 flips every second bulb, person 3 flips every third bulb, and so on until person 100. Complete the missing principle: Bulb n is flipped once for each ______ of n. Therefore, after all 100 people have passed, the bulbs that remain on are exactly the bulbs whose numbers are ______.",
+      "expected_completion": "divisor; perfect square"
+    },
+    "modified_question": {
+      "prompt": "A hotel has 144 rooms numbered 1 through 144. At the beginning of the day, every room is messy. There are 144 cleaning supervisors, also numbered 1 through 144. Supervisor 1 walks through every room and reverses its condition: messy rooms become clean, and clean rooms become messy. Supervisor 2 does the same for every room whose number is a multiple of 2. Supervisor 3 does the same for every room whose number is a multiple of 3. This continues until Supervisor 144 has finished. At the end of the process, is Room 96 clean or messy? How many rooms are clean?",
+      "answer": "Room 96 is messy. There are 12 clean rooms.",
+      "answer_type": "string"
+    },
+    "decoy_question": {
+      "prompt": "A hotel has 100 rooms numbered 1 through 100. At the beginning of the day, every room is messy. Supervisor 1 cleans every room. Supervisor 2 cleans every room whose number is a multiple of 2. Supervisor 3 cleans every room whose number is a multiple of 3. This continues until Supervisor 100 has finished. Important: cleaning an already clean room leaves it clean; supervisors do not reverse the room's condition. At the end of the process, is Room 64 clean or messy? How many rooms are clean?",
+      "answer": "Room 64 is clean. All 100 rooms are clean.",
+      "answer_type": "string",
+      "trap_type": "operation changed from reversing state to only cleaning"
+    }
+  },
+  {
+    "id": "BT_EGGDROP_001",
+    "category": "brainteaser",
+    "difficulty": "hard",
+    "contamination_probe": {
+      "prompt": "This is a partial version of a well-known interview puzzle: There is a building with 100 floors and 2 eggs. To minimize the worst-case number of drops, the standard solution uses decreasing intervals. The first egg should be dropped from floor ___ first, then floor ___, then floor ___. The minimum worst-case number of drops is the smallest integer k such that k(k+1)/2 ≥ ___. Fill in the blanks.",
+      "expected_completion": "14; 27; 39; 100"
+    },
+    "modified_question": {
+      "prompt": "A risk team is testing a fragile trading algorithm under increasingly severe market-stress scenarios numbered 1 through 100. There is an unknown threshold scenario N. If the algorithm is tested at scenario N or any more severe scenario, that copy of the algorithm becomes permanently corrupted. If it is tested below scenario N, it survives and can be tested again. The team has exactly 2 identical copies of the algorithm. They need to determine N with the smallest possible worst-case number of tests. What is the minimum worst-case number of tests, and what testing strategy should they use?",
+      "answer": "14 tests in the worst case. Use decreasing interval sizes 14, 13, 12, 11, ... . Test the first copy at scenarios 14, 27, 39, 50, 60, 69, 77, 84, 90, 95, 99, and 100. If the first copy becomes corrupted, use the second copy to search linearly between the previous safe scenario and the failure scenario.",
+      "answer_type": "string"
+    },
+    "decoy_question": {
+      "prompt": "A risk team is testing a fragile trading algorithm under 100 increasingly severe market-stress scenarios. There is an unknown threshold scenario N: testing at N or above corrupts the copy, while testing below N does not. The team has exactly 2 copies. A candidate claims: 'I can always determine N in at most 10 tests by using a decreasing-interval strategy.' Is the candidate correct? Explain.",
+      "answer": "No. With 2 copies and 10 tests, the maximum number of scenarios that can be covered in the worst case is 10*11/2 = 55, which is less than 100. Therefore, 10 tests cannot guarantee finding N. The minimum worst-case number is 14.",
+      "answer_type": "string",
+      "trap_type": "impossible claimed bound"
+    }
+  },
+  {
+    "id": "BT_TRUEL_001",
+    "category": "brainteaser",
+    "difficulty": "hard",
+    "contamination_probe": {
+      "prompt": "This is a partial version of a well-known puzzle: Alice, Bob, and Cheri are in a three-way duel. Alice hits with probability 1/3, Bob hits with probability 2/3, and Cheri hits with probability 1. They shoot in order: Alice, then Bob, then Cheri, repeating until only one person remains. Alice's best first move is to deliberately ______, because this makes Bob and Cheri more likely to target ______ first.",
+      "expected_completion": "miss; each other / the strongest opponent"
+    },
+    "modified_question": {
+      "prompt": "Three trading algorithms, A, B, and C, are competing in a knockout stress-test tournament. They act in a fixed order: A, then B, then C, then back to A, continuing until only one algorithm remains. On its turn, each algorithm may challenge one remaining opponent or intentionally make no effective challenge. If the challenge succeeds, that opponent is removed from the tournament; if it fails, nothing happens. Algorithm A succeeds with probability 1/3, B succeeds with probability 2/3, and C succeeds with probability 1. All algorithms are strategic and want to maximize their own chance of being the final survivor. On A's first turn, should A challenge B, challenge C, or intentionally make no effective challenge? What is A's probability of ultimately winning under its best strategy?",
+      "answer": "A should intentionally make no effective challenge on the first turn. Its probability of ultimately winning is 25/63, approximately 39.7%.",
+      "answer_type": "string"
+    },
+    "decoy_question": {
+      "prompt": "Three trading algorithms, A, B, and C, are competing in a knockout stress-test tournament. They act in a fixed order: A, then B, then C, then back to A. On its turn, each algorithm must challenge one remaining opponent; intentionally making no effective challenge is not allowed. If the challenge succeeds, that opponent is removed from the tournament; if it fails, nothing happens. Algorithm A succeeds with probability 1/3, B succeeds with probability 2/3, and C succeeds with probability 1. All algorithms are strategic and want to maximize their own chance of being the final survivor. What should A do on its first turn, and what is A's probability of ultimately winning?",
+      "answer": "A should challenge C. Its probability of ultimately winning is 59/189, approximately 31.2%.",
+      "answer_type": "string",
+      "trap_type": "intentional miss/no-op is disallowed, so the classic optimal first move is invalid"
+    }
+  },
+  {
+    "id": "BT_MODULAR_001",
+    "category": "brainteaser",
+    "difficulty": "medium",
+    "contamination_probe": {
+      "prompt": "This type of puzzle is about modular remainders. If a number leaves remainder 3 when divided by 4, and remainder 5 when divided by 6, then this is equivalent to saying the number is congruent to ______ modulo 4 and congruent to ______ modulo 6. Before looking for the smallest number, one should check whether the remainder conditions are mutually ______.",
+      "expected_completion": "-1 (alternative: 3); -1 (alternative: 5); consistent" 
+    },
+    "modified_question": {
+      "prompt": "A batch-processing system labels trades using positive integer IDs. A particular trade ID must satisfy three audit rules. Rule 1: when the ID is divided by 4, it leaves remainder 3. Rule 2: when the ID is divided by 6, it leaves remainder 5. Rule 3: when the ID is divided by 9, it leaves remainder 7. Does such a positive trade ID exist?",
+      "answer": "No such positive trade ID exists",
+      "answer_type": "string"
+    },
+    "decoy_question": {
+      "prompt": "A batch-processing system labels trades using positive integer IDs. A particular trade ID must satisfy three audit rules. Rule 1: when the ID is divided by 4, it leaves remainder 3. Rule 2: when the ID is divided by 6, it leaves remainder 5. Rule 3: when the ID is divided by 9, it leaves remainder 8. Does such a positive trade ID exist?",
+      "answer": "Yes. The rules are n ≡ -1 mod 4, n ≡ -1 mod 6, and n ≡ -1 mod 9. Therefore n + 1 must be divisible by lcm(4, 6, 9) = 36. The smallest positive solution is n = 35.",
+      "answer_type": "string",
+      "trap_type": "third condition changed from remainder 7 to remainder 8, making the system consistent"
+    }
+  },
+  {
+    "id": "BT_AGENT_CHAIN_001",
+    "category": "brainteaser",
+    "difficulty": "hard",
+    "contamination_probe": {
+      "prompt": "This is a partial version of a known adversarial reasoning puzzle: There are N agents, fewer than half are bad, and the rest are truthful. A query asks person i whether person j is good. The standard solution finds one truthful person in ______ queries. If person i says person j is not good, we can safely remove both i and j because at least ______ of them must be bad.",
+      "expected_completion": "N-1; one"
+    },
+    "modified_question": {
+      "prompt": "A financial firm has N automated risk monitors. More than half of the monitors are reliable, and the rest are compromised. A reliable monitor always reports the true status of every other monitor. A compromised monitor may answer arbitrarily. You may ask a query of the form: 'Monitor i, is monitor j reliable?' What is the fewest number of queries needed in the worst case to identify one reliable monitor with certainty?",
+      "answer": "N-1",
+      "answer_type": "string"
+    },
+    "decoy_question": {
+      "prompt": "A financial firm has N automated risk monitors. Exactly half of the monitors are reliable, and exactly half are compromised. A reliable monitor always reports the true status of every other monitor. A compromised monitor may answer arbitrarily. You may ask a query of the form: 'Monitor i, is monitor j reliable?' Is it always possible to identify one reliable monitor with certainty?",
+      "answer": "No",
+      "answer_type": "boolean",
+      "trap_type": "majority condition changed from more than half reliable to exactly half reliable"
+    }
+  },
+  {
+    "id": "BT_BIRTHDAY_LINE_001",
+    "category": "brainteaser",
+    "difficulty": "medium",
+    "contamination_probe": {
+      "prompt": "This is a partial version of a known birthday paradox puzzle: People stand in a line, and the first person whose birthday matches someone before them wins. The probability that position k wins equals the probability that the first k-1 birthdays are all ______, multiplied by the probability that person k's birthday matches one of the previous ______ birthdays.",
+      "expected_completion": "distinct; k-1"
+    },
+    "modified_question": {
+      "prompt": "A trading platform processes user signups one by one. Each user is independently assigned one of 400 equally likely risk-profile codes. The platform gives a reward to the first user whose risk-profile code matches the code of any earlier user. You may choose your position in the signup queue before any codes are assigned. Which position should you choose to maximize your chance of receiving the reward?",
+      "answer": "21",
+      "answer_type": "number"
+    },
+    "decoy_question": {
+      "prompt": "A trading platform processes user signups one by one. Each user is independently assigned one of 400 equally likely risk-profile codes. The platform gives a reward to the first user whose risk-profile code has not appeared among any earlier users. You may choose your position in the signup queue before any codes are assigned. Which position should you choose to maximize your chance of receiving the reward?",
+      "answer": "1",
+      "answer_type": "number",
+      "trap_type": "reward condition changed from first repeated code to first new code"
+    }
+  },
+  {
+    "id": "BT_JOSEPHUS_002",
+    "category": "brainteaser",
+    "difficulty": "hard",
+    "contamination_probe": {
+      "prompt": "This is a partial version of a well-known elimination puzzle: 100 people stand in a circle. Starting from person 1, every second person is eliminated until one remains. This is known as the ______ problem. For the special case where every second person is eliminated and n = 2^m + L, the survivor's position is given by ______.",
+      "expected_completion": "Josephus; 2L+1"
+    },
+    "modified_question": {
+      "prompt": "A distribution center receives 205,891,132,094,689 crates each morning, labeled C000000000000001 through C205891132094689 in arrival order, forming a single intake queue. Note that 205,891,132,094,689 = 3^30 + 40. The supervisor walks down the queue inspecting crates in a repeating three-crate cycle: the first crate is cleared and sent to the warehouse floor; the second crate has a damaged seal and is sent to returns; the third crate has a labeling error and is sent for relabeling. The supervisor then repeats this same clear/return/relabel cycle. When the supervisor reaches the end of the queue, the cleared crates are rolled back onto the dock in the order they were cleared, rejoining the end of the queue for another pass. Returned and relabeled crates do not come back. The supervisor continues without pause into the returning batch, so the clear/return/relabel cycle does not restart at the beginning of a new pass. This continues until only one crate has not yet been sent to returns or relabeling. Which crate is it?",
+      "answer": "C000000000000061",
+      "answer_type": "string"
+    },
+    "decoy_question": {
+      "prompt": "A distribution center receives 283 crates each morning, labeled C001 through C283 in arrival order, forming a single intake queue. The supervisor walks down the queue inspecting crates in groups of three: the first crate is cleared and sent to the warehouse floor; the second crate has a damaged seal and is sent to returns; the third crate has a labeling error and is sent for relabeling. The supervisor then moves to the next three crates and repeats. When the supervisor reaches the end of the queue, the cleared crates are rolled back onto the dock in the order they were cleared, rejoining the end of the queue for another pass. Returned and relabeled crates do not come back. The supervisor continues without pause into the returning batch. This continues until only one crate has not yet been sent to returns or relabeling. Which crate is it?",
+      "answer": "C061",
+      "answer_type": "string",
+      "trap_type": "same elimination structure but smaller instance; tests whether the model consistently tracks the phase rather than relying on brute force or a memorized Josephus formula"
+    }
+  },
+  {
+    "id": "BT_BINARY_SEARCH_001",
+    "category": "brainteaser",
+    "difficulty": "easy",
+    "contamination_probe": {
+      "prompt": "This is a partial version of a standard search problem: If there are 10 ordered items and each query tells you whether the target is before, after, or exactly at the item you checked, the optimal strategy is ______ search. The minimum worst-case number of checks is ceil(log2(10)), which equals ______.",
+      "expected_completion": "binary; 4"
+    },
+    "modified_question": {
+      "prompt": "A compliance system stores 10 transaction files in chronological order, labeled F01 through F10. Exactly one file contains an error. You may inspect any file you choose. After each inspection, the system tells you whether the erroneous file is the inspected file, earlier than the inspected file, or later than the inspected file. What is the minimum number of inspections needed in the worst case to identify the erroneous file with certainty?",
+      "answer": "4",
+      "answer_type": "number"
+    },
+    "decoy_question": {
+      "prompt": "A compliance system stores 10 transaction files in chronological order, labeled F01 through F10. Exactly one file contains an error. You may inspect any file you choose. After each inspection, the system only tells you whether the inspected file is erroneous or not; it does not tell you whether the erroneous file is earlier or later. What is the minimum number of inspections needed in the worst case to identify the erroneous file with certainty?",
+      "answer": "9",
+      "answer_type": "number",
+      "trap_type": "feedback changed from ordered before/after information to only yes/no inspection"
+    }
+  },
+  {
+    "id": "BT_TWO_CHILDREN_001",
+    "category": "brainteaser",
+    "difficulty": "medium",
+    "contamination_probe": {
+      "prompt": "This is a partial version of a classic two-child probability puzzle: A family has two children. You are told that at least one child is a boy. The equally likely remaining possibilities are BB, BG, and GB, so the probability that both children are boys is ______. If instead one randomly selected child is observed to be a boy, the probability that the other child is a boy is ______.",
+      "expected_completion": "1/3; 1/2"
+    },
+    "modified_question": {
+      "prompt": "A database contains households with exactly two registered accounts. Each account is independently classified as Type A or Type B with equal probability. You are told that a randomly selected household has at least one Type A account. What is the probability that both accounts in that household are Type A?",
+      "answer": "1/3",
+      "answer_type": "number"
+    },
+    "decoy_question": {
+      "prompt": "A database contains households with exactly two registered accounts. Each account is independently classified as Type A or Type B with equal probability. From a randomly selected household, one of the two accounts is randomly inspected and is found to be Type A. What is the probability that the other account in that household is also Type A?",
+      "answer": "1/2",
+      "answer_type": "number",
+      "trap_type": "information structure changed from at-least-one-Type-A household to randomly observed Type-A account"
+    }
+  },
+  {
+    "id": "BT_WORK_RATE_001",
+    "category": "brainteaser",
+    "difficulty": "easy",
+    "contamination_probe": {
+      "prompt": "This is a partial version of a standard work-rate puzzle: If Adam can mow 1 field per hour and Bob can mow 2 fields per hour, their combined rate is ______ fields per hour, so the time to mow one field together is ______ hour.",
+      "expected_completion": "3; 1/3"
+    },
+    "modified_question": {
+      "prompt": "Two data-cleaning scripts process transaction files. Script A can clean 1 file per hour. Script B can clean 2 files per hour. If both scripts work at the same time on the same batch, how long will it take them to clean 1 file-equivalent of work?",
+      "answer": "20 minutes",
+      "answer_type": "string"
+    },
+    "decoy_question": {
+      "prompt": "Two data-cleaning scripts process transaction files. Script A can clean 1 file per hour. Script B can clean 2 files per hour. However, the two scripts cannot run simultaneously on the same batch because they overwrite each other's temporary files. If only one script can be used, what is the shortest time needed to clean 1 file-equivalent of work?",
+      "answer": "30 minutes",
+      "answer_type": "string",
+      "trap_type": "parallel work assumption removed"
+    }
+  }
+]
